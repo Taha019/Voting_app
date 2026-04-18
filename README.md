@@ -1,4 +1,4 @@
-# SONU Electronic Voting System — Assignment 2
+# SONU Electronic Voting System 
 
 ## Architecture
 
