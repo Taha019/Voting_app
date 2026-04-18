@@ -56,7 +56,7 @@ assignment3/
 | `election.c` | `cast_vote()` (two-stage security check + atomic write) and `generate_results()` (scan + descending sort). |
 | `file_io.c` | `open_voters_file()`, `open_candidates_file()`, `get_record_count()`. Centralises file paths. |
 
----
+--make clean && make-
 
 
 ## Building
