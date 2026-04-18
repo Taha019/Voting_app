@@ -1,6 +1,28 @@
+<<<<<<< HEAD
 # SONU Electronic Voting System — Assignment 2
+=======
+# SONU Electronic Voting System — Assignment 3
 
-## Architecture
+## Overview
+
+
+This is the **Assignment 3** upgrade of the SONU Electronic Voting System.
+It implements a **Linux/POSIX, connectionless UDP client-server architecture**. The server handles each UDP datagram request in a separate child process (via `fork()`), allowing multiple clients to be served concurrently. The client and server communicate using a simple, pipe-delimited text protocol. All business logic and data storage are handled by the server; the client is stateless and connectionless.
+
+
+| What changed | Assignment 2 | Assignment 3 |
+|---|---|---|
+| OS / API | Windows (Winsock2) | Linux / POSIX |
+| Transport | TCP — `SOCK_STREAM` | **UDP — `SOCK_DGRAM`** |
+| Concurrency | Iterative (one client at a time) | **Concurrent: fork() per datagram** |
+| Connection model | Connection-oriented (`connect` / `accept`) | **Connectionless** (`sendto` / `recvfrom`) |
+| Client IP | Hardcoded `127.0.0.1` | **Runtime argument** `./client [ip]` |
+
+---
+>>>>>>> 2ba28a9 (update readme.md)
+
+
+## Directory Structure & Architecture
 
 ```
 assignment3/
@@ -36,16 +58,17 @@ assignment3/
 
 ---
 
+
 ## Building
 
-Requires GCC and standard POSIX libraries (no extra packages needed on any
-modern Linux distribution).
+Requires GCC and standard POSIX libraries (no extra packages needed on any modern Linux distribution).
 
 ```bash
 make
 ```
 
-This produces `bin/server` and `bin/client`.
+
+This produces `bin/server` and `bin/client` (executables for Linux, no .exe extension).
 
 To rebuild from scratch:
 
@@ -55,9 +78,11 @@ make clean && make
 
 ---
 
+
 ## Running
 
-### Same machine
+
+### Same machine (localhost)
 
 ```bash
 # Terminal 1 — start the server
@@ -66,6 +91,7 @@ make clean && make
 # Terminal 2 — start the client (defaults to 127.0.0.1)
 ./bin/client
 ```
+
 
 ### Same network (LAN)
 
@@ -82,6 +108,7 @@ On any other machine on the same network:
 ```bash
 ./bin/client 192.168.1.42
 ```
+
 
 ### Different network (across the internet)
 
@@ -119,22 +146,24 @@ The client banner confirms the target on startup:
 
 ---
 
+
 ## Application Protocol
 
 All messages are **pipe-delimited plain-text strings terminated by `\n`**.
 Each client operation is exactly one datagram sent and one datagram received —
 no session state is maintained between operations.
 
+
 | Operation | Client → Server | Server → Client |
 |---|---|---|
-| Register voter | `REG_VOTER\|name\|user\|pass` | `OK\|voter_id` or `ERR\|USERNAME_TAKEN` |
-| Register candidate | `REG_CAND\|name\|user\|pass\|pos_id` | `OK\|cand_id` or `ERR\|INVALID_POSITION` / `ERR\|USERNAME_TAKEN` |
-| Login voter | `LOGIN_VOTER\|user\|pass` | `OK\|voter_id\|full_name` or `ERR\|INVALID_CREDENTIALS` |
-| Login candidate | `LOGIN_CAND\|user\|pass` | `OK\|cand_id\|name\|position\|votes` or `ERR\|INVALID_CREDENTIALS` |
-| Cast vote | `CAST_VOTE\|voter_id\|cand_id\|pos_id` | `OK\|VOTE_CAST` or `ERR\|ALREADY_VOTED` / `ERR\|INVALID_CANDIDATE` / `ERR\|VOTER_NOT_FOUND` |
-| Get results | `GET_RESULTS\|pos_id` | `OK\|count\|name1\|votes1\|name2\|votes2\|...` or `ERR\|INVALID_POSITION` |
-| List candidates | `LIST_CANDS\|pos_id` | `OK\|count\|id1\|name1\|votes1\|...` or `ERR\|INVALID_POSITION` |
-| Voter status | `VOTER_STATUS\|voter_id` | `OK\|name\|flag0\|flag1\|flag2\|flag3\|flag4` (flag = 1 if voted) |
+| Register voter | `REG_VOTER|name|user|pass` | `OK|voter_id` or `ERR|USERNAME_TAKEN` |
+| Register candidate | `REG_CAND|name|user|pass|pos_id` | `OK|cand_id` or `ERR|INVALID_POSITION` / `ERR|USERNAME_TAKEN` |
+| Login voter | `LOGIN_VOTER|user|pass` | `OK|voter_id|full_name` or `ERR|INVALID_CREDENTIALS` |
+| Login candidate | `LOGIN_CAND|user|pass` | `OK|cand_id|name|position|votes` or `ERR|INVALID_CREDENTIALS` |
+| Cast vote | `CAST_VOTE|voter_id|cand_id|pos_id` | `OK|VOTE_CAST` or `ERR|ALREADY_VOTED` / `ERR|INVALID_CANDIDATE` / `ERR|VOTER_NOT_FOUND` |
+| Get results | `GET_RESULTS|pos_id` | `OK|count|name1|votes1|name2|votes2|...` or `ERR|INVALID_POSITION` |
+| List candidates | `LIST_CANDS|pos_id` | `OK|count|id1|name1|votes1|...` or `ERR|INVALID_POSITION` |
+| Voter status | `VOTER_STATUS|voter_id` | `OK|name|flag0|flag1|flag2|flag3|flag4` (flag = 1 if voted) |
 
 ### Position IDs
 
@@ -290,21 +319,21 @@ connection — each menu action is a self-contained datagram exchange.
 
 ---
 
+
 ## Data Files
 
-Both files live in the `data/` directory and are created automatically on
-first use. They store fixed-size C structs sequentially — record `n` is always
-at byte offset `(n-1) * sizeof(struct)`, enabling O(1) direct-seek access.
+Both files live in the `data/` directory and are created automatically on first use. They store fixed-size C structs sequentially — record `n` is always at byte offset `(n-1) * sizeof(struct)`, enabling O(1) direct-seek access.
 
 | File | Struct | Key fields |
 |---|---|---|
 | `data/voters.dat` | `Voter` | `voter_id`, `username`, `password`, `voted_positions[5]`, `is_registered` |
 | `data/candidates.dat` | `Candidate` | `candidate_id`, `username`, `password`, `position_id`, `vote_count`, `is_registered` |
 
-> **Note:** The data files are shared exclusively by the server. The client
-> never touches them directly — all data access goes through the UDP protocol.
+
+> **Note:** The data files are shared exclusively by the server. The client never touches them directly — all data access goes through the UDP protocol.
 
 ---
+
 
 ## Firewall & Port Forwarding Quick Reference
 
@@ -314,6 +343,7 @@ at byte offset `(n-1) * sizeof(struct)`, enabling O(1) direct-seek access.
 | Same LAN | Open firewall: `sudo ufw allow 8080/udp` |
 | Different network | Firewall + port forwarding on router (UDP 8080 → server LAN IP) |
 | No router access | Use a cloud VM with a public IP, or a tunnel (e.g. WireGuard) |
+
 
 Find the server's public IP (needed for cross-network clients):
 ```bash
