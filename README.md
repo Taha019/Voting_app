@@ -137,6 +137,19 @@ The client banner confirms the target on startup:
 
 ---
 
+<<<<<<< HEAD
+=======
+## Cross-Platform Client Support
+
+- The client (`client.c`) is designed to work on both **Linux** and **Windows** (with minor adjustments for socket initialization and includes).
+- On Linux, compile and run as described above.
+- On Windows, use a compatible C compiler (e.g., MinGW or Visual Studio), and ensure Winsock2 initialization is handled if porting.
+- The client can communicate with the server regardless of the OS, as long as both support UDP sockets and the protocol.
+
+
+---
+
+>>>>>>> 2e9d4b6 (client support for windows)
 ## Application Protocol
 
 All messages are **pipe-delimited plain-text strings terminated by `\n`**.
@@ -337,3 +350,7 @@ Find the server's public IP (needed for cross-network clients):
 ```bash
 curl ifconfig.me
 ```
+<<<<<<< HEAD
+=======
+
+>>>>>>> 2e9d4b6 (client support for windows)

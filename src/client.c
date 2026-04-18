@@ -1,90 +1,117 @@
 /* ═══════════════════════════════════════════════════════════════════
  *  SONU Electronic Voting System — Assignment 3
- *  UDP Client (POSIX / Linux)
+ *  UDP Client  (cross-platform: Windows + Linux)
  *
- *  Sends each command as a single UDP datagram to the server and
- *  waits for the reply datagram.  No persistent connection is kept
- *  between operations — fully connectionless.
+ *  On Windows: uses Winsock2  (link with -lws2_32)
+ *  On Linux  : uses POSIX BSD sockets
  *
- *  Build:
- *    gcc -Wall -std=c99 -o bin/client src/client.c
+ *  Build — Windows (MinGW / MSYS2):
+ *    gcc -Wall -std=c99 -o client.exe client.c positions.h -lws2_32
+ *
+ *  Build — Linux:
+ *    gcc -Wall -std=c99 -D_POSIX_C_SOURCE=200809L -o client client.c
  *
  *  Usage:
- *    ./bin/client                  # connects to 127.0.0.1 (same machine)
- *    ./bin/client 192.168.1.42     # connects to server on local network
- *    ./bin/client 203.0.113.5      # connects to server on another network
+ *    client.exe                   connects to 127.0.0.1 (same machine)
+ *    client.exe 192.168.1.42      server on same LAN
+ *    client.exe 203.0.113.5       server on another network
  * ═══════════════════════════════════════════════════════════════════ */
 
-#define _POSIX_C_SOURCE 200809L
+/* ── Platform detection & socket portability layer ───────────────── */
+#ifdef _WIN32
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib")
+  typedef int socklen_t;
+  #define CLOSE_SOCK(s)  closesocket(s)
+  #define SOCK_ERR       INVALID_SOCKET
+  #define BAD_SOCK(s)    ((s) == INVALID_SOCKET)
+  #define RECV_FAILED(n) ((n) == SOCKET_ERROR)
+  typedef SOCKET sock_t;
+  /* SO_RCVTIMEO on Windows takes a DWORD (milliseconds) */
+  static void set_recv_timeout(SOCKET s, int seconds) {
+      DWORD ms = (DWORD)(seconds * 1000);
+      setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ms, sizeof(ms));
+  }
+#else
+  #define _POSIX_C_SOURCE 200809L
+  #include <unistd.h>
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  #include <sys/time.h>
+  #define CLOSE_SOCK(s)  close(s)
+  #define SOCK_ERR       (-1)
+  #define BAD_SOCK(s)    ((s) < 0)
+  #define RECV_FAILED(n) ((n) < 0)
+  typedef int sock_t;
+  static void set_recv_timeout(int s, int seconds) {
+      struct timeval tv;
+      tv.tv_sec  = seconds;
+      tv.tv_usec = 0;
+      setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  }
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
 
-#include "../headers/positions.h"
+/* positions.h is in the same directory on the Windows client machine */
+#include "positions.h"
 
 #define SERVER_PORT  8080
 #define BUFFER_SIZE  4096
 #define MAX_FIELDS   128
 #define RECV_TIMEOUT 5      /* seconds to wait for a server reply */
 
-/* Server IP — default is localhost, overridden by argv[1] at startup */
+/* Server IP — default localhost, overridden by argv[1] */
 static char g_server_ip[64] = "127.0.0.1";
 
 /* ── Network helper (UDP) ────────────────────────────────────────── *
  * Creates a UDP socket, sends one datagram, waits for the reply,
- * then closes the socket.  One socket per request — fully
- * connectionless, matching the UDP server design.
+ * then closes the socket.  One socket per request — connectionless.
  * Returns 1 on success, 0 on failure.
  */
 static int send_command(const char *command, char *response, int resp_size)
 {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
+    sock_t sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (BAD_SOCK(sock)) {
         printf("  [!] socket() failed.\n");
         return 0;
     }
 
-    /* Set a receive timeout so we do not block forever */
-    struct timeval tv;
-    tv.tv_sec  = RECV_TIMEOUT;
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    set_recv_timeout(sock, RECV_TIMEOUT);
 
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family      = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(g_server_ip);   /* uses runtime IP */
+    server_addr.sin_addr.s_addr = inet_addr(g_server_ip);
     server_addr.sin_port        = htons(SERVER_PORT);
 
     /* Send the command datagram */
-    ssize_t sent = sendto(sock, command, strlen(command), 0,
-                          (struct sockaddr *)&server_addr,
-                          sizeof(server_addr));
+    int sent = sendto(sock, command, (int)strlen(command), 0,
+                      (struct sockaddr *)&server_addr,
+                      sizeof(server_addr));
     if (sent < 0) {
         printf("  [!] sendto() failed — is the server running?\n");
-        close(sock);
+        CLOSE_SOCK(sock);
         return 0;
     }
 
     /* Wait for the reply datagram */
     memset(response, 0, resp_size);
-    ssize_t bytes = recvfrom(sock, response, resp_size - 1, 0, NULL, NULL);
-    close(sock);
+    int bytes = recvfrom(sock, response, resp_size - 1, 0, NULL, NULL);
+    CLOSE_SOCK(sock);
 
-    if (bytes < 0) {
+    if (RECV_FAILED(bytes)) {
         printf("  [!] No response from server (timeout after %ds).\n",
                RECV_TIMEOUT);
         return 0;
     }
 
     response[bytes] = '\0';
-    response[strcspn(response, "\r\n")] = '\0';   /* Strip newline */
+    response[strcspn(response, "\r\n")] = '\0';
     return 1;
 }
 
@@ -156,7 +183,6 @@ static void voting_booth(int voter_id, const char *voter_name)
 
         switch (choice) {
 
-        /* ── List candidates ─────────────────────────────────────── */
         case 1: {
             int pos = choose_position();
             if (pos < 0) break;
@@ -190,7 +216,6 @@ static void voting_booth(int voter_id, const char *voter_name)
             break;
         }
 
-        /* ── Cast vote ───────────────────────────────────────────── */
         case 2: {
             int pos = choose_position();
             if (pos < 0) break;
@@ -247,7 +272,6 @@ static void voting_booth(int voter_id, const char *voter_name)
             break;
         }
 
-        /* ── Voting status ───────────────────────────────────────── */
         case 3: {
             snprintf(cmd, sizeof(cmd), "VOTER_STATUS|%d\n", voter_id);
             if (!send_command(cmd, resp, sizeof(resp))) break;
@@ -257,7 +281,7 @@ static void voting_booth(int voter_id, const char *voter_name)
             int nf = parse_response(resp_copy, fields, MAX_FIELDS);
 
             if (nf >= 2 && strcmp(fields[0], "OK") == 0) {
-                printf("\n  Voting Status  —  %s\n", fields[1]);
+                printf("\n  Voting Status  -  %s\n", fields[1]);
                 printf("  %-22s  %s\n", "Position", "Status");
                 printf("  %-22s  %s\n",
                        "----------------------", "----------");
@@ -305,15 +329,13 @@ static void voter_portal(void)
             read_line("  Username  : ", user, sizeof(user));
             read_line("  Password  : ", pass, sizeof(pass));
 
-            snprintf(cmd, sizeof(cmd), "REG_VOTER|%s|%s|%s\n",
-                     name, user, pass);
+            snprintf(cmd, sizeof(cmd), "REG_VOTER|%s|%s|%s\n", name, user, pass);
             if (send_command(cmd, resp, sizeof(resp))) {
                 strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
                 resp_copy[sizeof(resp_copy) - 1] = '\0';
                 int nf = parse_response(resp_copy, fields, 16);
                 if (nf >= 2 && strcmp(fields[0], "OK") == 0)
-                    printf("  [OK]  Registered!  Your Voter ID: %s\n",
-                           fields[1]);
+                    printf("  [OK]  Registered!  Your Voter ID: %s\n", fields[1]);
                 else
                     printf("  [ERR] Username already taken.  Choose another.\n");
             }
@@ -438,7 +460,7 @@ static void results_menu(void)
 
             if (nf >= 2 && strcmp(fields[0], "OK") == 0) {
                 int count = atoi(fields[1]);
-                printf("\n  Results  —  %s\n", POSITION_NAMES[pos]);
+                printf("\n  Results  -  %s\n", POSITION_NAMES[pos]);
                 printf("  %-4s  %-28s  %s\n", "Rank", "Name", "Votes");
                 printf("  %-4s  %-28s  %s\n",
                        "----", "----------------------------", "-----");
@@ -474,8 +496,7 @@ static void results_menu(void)
                     if (count == 0) {
                         printf("  (no candidates registered)\n");
                     } else {
-                        printf("  %-4s  %-28s  %s\n",
-                               "Rank", "Name", "Votes");
+                        printf("  %-4s  %-28s  %s\n", "Rank", "Name", "Votes");
                         printf("  %-4s  %-28s  %s\n",
                                "----", "----------------------------", "-----");
                         for (int i = 0; i < count; i++) {
@@ -494,11 +515,15 @@ static void results_menu(void)
 /* ── Entry point ─────────────────────────────────────────────────── */
 int main(int argc, char *argv[])
 {
-    /* Optional: pass the server's IP as the first argument.
-     * Usage:  ./bin/client [server-ip]
-     * Example: ./bin/client 192.168.1.42     (same network)
-     *          ./bin/client 203.0.113.5      (different network, needs port forwarding)
-     * Defaults to 127.0.0.1 (same machine) if omitted. */
+#ifdef _WIN32
+    /* Initialise Winsock on Windows */
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        printf("[!] WSAStartup failed.\n");
+        return 1;
+    }
+#endif
+
     if (argc >= 2) {
         strncpy(g_server_ip, argv[1], sizeof(g_server_ip) - 1);
         g_server_ip[sizeof(g_server_ip) - 1] = '\0';
@@ -506,7 +531,7 @@ int main(int argc, char *argv[])
 
     printf("==========================================\n");
     printf("    ELECTRONIC VOTING SYSTEM  v3.0       \n");
-    printf("    Assignment 3  —  UDP Connectionless  \n");
+    printf("    Assignment 3  -  UDP Connectionless  \n");
     printf("==========================================\n");
     printf("    Server  : %s:%d\n", g_server_ip, SERVER_PORT);
     printf("==========================================\n");
@@ -530,5 +555,8 @@ int main(int argc, char *argv[])
         }
     } while (choice != 4);
 
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return 0;
 }
