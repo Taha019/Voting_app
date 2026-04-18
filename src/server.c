@@ -30,6 +30,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ifaddrs.h>           /* getifaddrs — prints local IPs at startup */
 
 #include "../headers/positions.h"
 #include "../headers/voter.h"
@@ -41,6 +42,28 @@
 #define BUFFER_SIZE       4096
 #define MAX_FIELDS        128
 #define MAX_CANDS_PER_POS 64
+
+/* ── Print all local IPv4 addresses ─────────────────────────────── *
+ * Called once at startup so the user knows which IPs to give to
+ * clients on the same network.  For cross-network access they still
+ * need the router's public IP (curl ifconfig.me).
+ */
+static void print_local_ips(void)
+{
+    struct ifaddrs *ifap, *ifa;
+    if (getifaddrs(&ifap) != 0) return;
+
+    printf("[SERVER] Local interfaces:\n");
+    for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+            continue;
+        struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
+        printf("         %-12s  %s\n",
+               ifa->ifa_name, inet_ntoa(sa->sin_addr));
+    }
+    freeifaddrs(ifap);
+    printf("\n");
+}
 
 /* ── Pipe-delimited field parser ─────────────────────────────────── */
 static int parse_fields(char *str, char *fields[], int max_fields)
@@ -231,7 +254,11 @@ int main(void)
     printf("    SONU VOTING SYSTEM  —  SERVER v3.0   \n");
     printf("    UDP Connectionless + fork() per req  \n");
     printf("    Listening on 0.0.0.0:%d             \n", SERVER_PORT);
-    printf("==========================================\n");
+    printf("==========================================\n\n");
+
+    /* Print every local IPv4 address so the user knows what to give clients */
+    print_local_ips();
+
     printf("[SERVER] Awaiting UDP datagrams...\n\n");
 
     /* ── Main receive loop (iterative) ──────────────────────────── *
@@ -262,7 +289,7 @@ int main(void)
         buffer[bytes_recv] = '\0';
 
         /* Log incoming request in the parent before forking */
-        printf("[SERVER] Datagram from %s:%d  →  %s",
+        printf("[SERVER] Datagram from %s:%d  ->  %s",
                inet_ntoa(client_addr.sin_addr),
                ntohs(client_addr.sin_port),
                buffer);

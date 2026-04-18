@@ -8,6 +8,11 @@
  *
  *  Build:
  *    gcc -Wall -std=c99 -o bin/client src/client.c
+ *
+ *  Usage:
+ *    ./bin/client                  # connects to 127.0.0.1 (same machine)
+ *    ./bin/client 192.168.1.42     # connects to server on local network
+ *    ./bin/client 203.0.113.5      # connects to server on another network
  * ═══════════════════════════════════════════════════════════════════ */
 
 #define _POSIX_C_SOURCE 200809L
@@ -23,11 +28,13 @@
 
 #include "../headers/positions.h"
 
-#define SERVER_IP    "127.0.0.1"
 #define SERVER_PORT  8080
 #define BUFFER_SIZE  4096
 #define MAX_FIELDS   128
 #define RECV_TIMEOUT 5      /* seconds to wait for a server reply */
+
+/* Server IP — default is localhost, overridden by argv[1] at startup */
+static char g_server_ip[64] = "127.0.0.1";
 
 /* ── Network helper (UDP) ────────────────────────────────────────── *
  * Creates a UDP socket, sends one datagram, waits for the reply,
@@ -52,7 +59,7 @@ static int send_command(const char *command, char *response, int resp_size)
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family      = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    server_addr.sin_addr.s_addr = inet_addr(g_server_ip);   /* uses runtime IP */
     server_addr.sin_port        = htons(SERVER_PORT);
 
     /* Send the command datagram */
@@ -485,11 +492,23 @@ static void results_menu(void)
 }
 
 /* ── Entry point ─────────────────────────────────────────────────── */
-int main(void)
+int main(int argc, char *argv[])
 {
+    /* Optional: pass the server's IP as the first argument.
+     * Usage:  ./bin/client [server-ip]
+     * Example: ./bin/client 192.168.1.42     (same network)
+     *          ./bin/client 203.0.113.5      (different network, needs port forwarding)
+     * Defaults to 127.0.0.1 (same machine) if omitted. */
+    if (argc >= 2) {
+        strncpy(g_server_ip, argv[1], sizeof(g_server_ip) - 1);
+        g_server_ip[sizeof(g_server_ip) - 1] = '\0';
+    }
+
     printf("==========================================\n");
     printf("    ELECTRONIC VOTING SYSTEM  v3.0       \n");
     printf("    Assignment 3  —  UDP Connectionless  \n");
+    printf("==========================================\n");
+    printf("    Server  : %s:%d\n", g_server_ip, SERVER_PORT);
     printf("==========================================\n");
 
     int choice;
