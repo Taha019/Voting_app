@@ -1,559 +1,189 @@
 /* ═══════════════════════════════════════════════════════════════════
- *  SONU Electronic Voting System — Assignment 3
- *  UDP Client  (cross-platform: Windows + Linux)
- *
- *  On Windows: uses Winsock2  (link with -lws2_32)
- *  On Linux  : uses POSIX BSD sockets
- *
- *  Build — Windows (MinGW / MSYS2):
- *    gcc -Wall -std=c99 -o client.exe client.c positions.h -lws2_32
- *
- *  Build — Linux:
- *    gcc -Wall -std=c99 -D_POSIX_C_SOURCE=200809L -o client client.c
- *
- *  Usage:
- *    client.exe                   connects to 127.0.0.1 (same machine)
- *    client.exe 192.168.1.42      server on same LAN
- *    client.exe 203.0.113.5       server on another network
+ * SONU Electronic Voting System — Assignment 3
+ * UDP Client  (Optimized for playit.gg / Remote Access)
  * ═══════════════════════════════════════════════════════════════════ */
 
-/* ── Platform detection & socket portability layer ───────────────── */
 #ifdef _WIN32
   #include <winsock2.h>
   #include <ws2tcpip.h>
   #pragma comment(lib, "ws2_32.lib")
   typedef int socklen_t;
   #define CLOSE_SOCK(s)  closesocket(s)
-  #define SOCK_ERR       INVALID_SOCKET
   #define BAD_SOCK(s)    ((s) == INVALID_SOCKET)
-  #define RECV_FAILED(n) ((n) == SOCKET_ERROR)
   typedef SOCKET sock_t;
-  /* SO_RCVTIMEO on Windows takes a DWORD (milliseconds) */
-  static void set_recv_timeout(SOCKET s, int seconds) {
-      DWORD ms = (DWORD)(seconds * 1000);
-      setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ms, sizeof(ms));
-  }
 #else
   #define _POSIX_C_SOURCE 200809L
   #include <unistd.h>
   #include <sys/socket.h>
   #include <netinet/in.h>
   #include <arpa/inet.h>
-  #include <sys/time.h>
+  #include <netdb.h>
+  #include <sys/time.h>    
   #define CLOSE_SOCK(s)  close(s)
-  #define SOCK_ERR       (-1)
   #define BAD_SOCK(s)    ((s) < 0)
-  #define RECV_FAILED(n) ((n) < 0)
   typedef int sock_t;
-  static void set_recv_timeout(int s, int seconds) {
-      struct timeval tv;
-      tv.tv_sec  = seconds;
-      tv.tv_usec = 0;
-      setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  }
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* positions.h is in the same directory on the Windows client machine */
-#include "positions.h"
+/* ── Inline POSITIONS_H Logic ────────────────────────────────────── */
+#define MAX_POSITIONS     5
+#define MAX_NAME_LEN      64
+#define POS_CHAIRMAN      0
+#define POS_VICE_CHAIRMAN 1
+#define POS_SECRETARY     2
+#define POS_TREASURER     3
+#define POS_PRO           4
 
-#define SERVER_PORT  8080
-#define BUFFER_SIZE  4096
-#define MAX_FIELDS   128
-#define RECV_TIMEOUT 5      /* seconds to wait for a server reply */
+static const char * const POSITION_NAMES[MAX_POSITIONS] = {
+    "Chairman", "Vice Chairman", "Secretary", "Treasurer", "PRO"
+};
 
-/* Server IP — default localhost, overridden by argv[1] */
-static char g_server_ip[64] = "127.0.0.1";
+/* ── Global Configuration ────────────────────────────────────────── */
+#define BUFFER_SIZE 4096
+static char g_server_ip[128] = "147.185.221.223"; // Your Playit IP
+static int  g_server_port = 3467;                 // Your Playit Port
 
-/* ── Network helper (UDP) ────────────────────────────────────────── *
- * Creates a UDP socket, sends one datagram, waits for the reply,
- * then closes the socket.  One socket per request — connectionless.
- * Returns 1 on success, 0 on failure.
- */
-static int send_command(const char *command, char *response, int resp_size)
-{
-    sock_t sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (BAD_SOCK(sock)) {
-        printf("  [!] socket() failed.\n");
-        return 0;
-    }
+/* ── UI Helpers ──────────────────────────────────────────────────── */
+static void print_line(void) { printf("------------------------------------------\n"); }
 
-    set_recv_timeout(sock, RECV_TIMEOUT);
-
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family      = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(g_server_ip);
-    server_addr.sin_port        = htons(SERVER_PORT);
-
-    /* Send the command datagram */
-    int sent = sendto(sock, command, (int)strlen(command), 0,
-                      (struct sockaddr *)&server_addr,
-                      sizeof(server_addr));
-    if (sent < 0) {
-        printf("  [!] sendto() failed — is the server running?\n");
-        CLOSE_SOCK(sock);
-        return 0;
-    }
-
-    /* Wait for the reply datagram */
-    memset(response, 0, resp_size);
-    int bytes = recvfrom(sock, response, resp_size - 1, 0, NULL, NULL);
-    CLOSE_SOCK(sock);
-
-    if (RECV_FAILED(bytes)) {
-        printf("  [!] No response from server (timeout after %ds).\n",
-               RECV_TIMEOUT);
-        return 0;
-    }
-
-    response[bytes] = '\0';
-    response[strcspn(response, "\r\n")] = '\0';
-    return 1;
-}
-
-/* ── Input helpers ───────────────────────────────────────────────── */
-
-static void read_line(const char *prompt, char *buf, int size)
-{
+static void read_line(const char *prompt, char *buf, int size) {
     printf("%s", prompt);
-    fflush(stdout);
-    if (fgets(buf, size, stdin) == NULL) { buf[0] = '\0'; return; }
+    fgets(buf, size, stdin);
     buf[strcspn(buf, "\r\n")] = '\0';
 }
 
-static int read_int(const char *prompt)
-{
+static int read_int(const char *prompt) {
     char buf[32];
     read_line(prompt, buf, sizeof(buf));
     return atoi(buf);
 }
 
-static void print_line(void)
-{
-    printf("  -----------------------------------------\n");
-}
+/* ── Network Engine ──────────────────────────────────────────────── */
+static int send_command(const char *command, char *response, int resp_size) {
+    sock_t sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (BAD_SOCK(sock)) return 0;
 
-/* ── Pipe-delimited response parser ──────────────────────────────── */
-static int parse_response(char *resp, char *fields[], int max_fields)
-{
-    int count = 0;
-    char *token = strtok(resp, "|");
-    while (token && count < max_fields) {
-        fields[count++] = token;
-        token = strtok(NULL, "|");
+    struct hostent *he = gethostbyname(g_server_ip);
+    if (he == NULL) {
+        CLOSE_SOCK(sock);
+        return 0;
     }
-    return count;
-}
 
-/* ── Position picker ─────────────────────────────────────────────── */
-static int choose_position(void)
-{
-    printf("\n  Positions:\n");
-    for (int i = 0; i < MAX_POSITIONS; i++)
-        printf("    %d. %s\n", i, POSITION_NAMES[i]);
-    int pos = read_int("  Enter Position ID (0-4): ");
-    if (pos < 0 || pos >= MAX_POSITIONS) {
-        printf("  [!] Invalid position ID.\n");
-        return -1;
-    }
-    return pos;
-}
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(g_server_port);
+    memcpy(&server_addr.sin_addr, he->h_addr_list[0], he->h_length);
 
-/* ── Voting Booth ────────────────────────────────────────────────── */
-static void voting_booth(int voter_id, const char *voter_name)
-{
-    printf("\n  Welcome, %s!  (Voter ID: %d)\n", voter_name, voter_id);
+    sendto(sock, command, strlen(command), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
 
-    int   choice;
-    char  cmd[BUFFER_SIZE], resp[BUFFER_SIZE], resp_copy[BUFFER_SIZE];
-    char *fields[MAX_FIELDS];
-
-    do {
-        printf("\n=== VOTING BOOTH ===\n");
-        printf("  1. List Candidates for a Position\n");
-        printf("  2. Cast Vote\n");
-        printf("  3. My Voting Status\n");
-        printf("  4. Logout\n");
-        print_line();
-        choice = read_int("  Choice: ");
-
-        switch (choice) {
-
-        case 1: {
-            int pos = choose_position();
-            if (pos < 0) break;
-
-            snprintf(cmd, sizeof(cmd), "LIST_CANDS|%d\n", pos);
-            if (!send_command(cmd, resp, sizeof(resp))) break;
-
-            strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-            resp_copy[sizeof(resp_copy) - 1] = '\0';
-            int nf = parse_response(resp_copy, fields, MAX_FIELDS);
-
-            if (nf >= 1 && strcmp(fields[0], "OK") == 0) {
-                int count = (nf >= 2) ? atoi(fields[1]) : 0;
-                printf("\n  Candidates for %s:\n", POSITION_NAMES[pos]);
-                if (count == 0) {
-                    printf("  (none registered)\n");
-                } else {
-                    printf("  %-5s  %-28s  %s\n", "ID", "Name", "Votes");
-                    printf("  %-5s  %-28s  %s\n",
-                           "-----", "----------------------------", "-----");
-                    for (int i = 0; i < count; i++) {
-                        int base = 2 + i * 3;
-                        if (base + 2 < nf)
-                            printf("  %-5s  %-28s  %s\n",
-                                   fields[base], fields[base+1], fields[base+2]);
-                    }
-                }
-            } else {
-                printf("  [ERR] %s\n", (nf >= 2) ? fields[1] : "Unknown error");
-            }
-            break;
-        }
-
-        case 2: {
-            int pos = choose_position();
-            if (pos < 0) break;
-
-            snprintf(cmd, sizeof(cmd), "LIST_CANDS|%d\n", pos);
-            if (!send_command(cmd, resp, sizeof(resp))) break;
-
-            strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-            resp_copy[sizeof(resp_copy) - 1] = '\0';
-            int nf = parse_response(resp_copy, fields, MAX_FIELDS);
-
-            if (nf < 2 || strcmp(fields[0], "OK") != 0) {
-                printf("  [ERR] Could not fetch candidates.\n");
-                break;
-            }
-            int count = atoi(fields[1]);
-            if (count == 0) {
-                printf("  [!] No candidates registered for %s.\n",
-                       POSITION_NAMES[pos]);
-                break;
-            }
-
-            printf("  %-5s  %-28s\n", "ID", "Name");
-            printf("  %-5s  %-28s\n", "-----", "----------------------------");
-            for (int i = 0; i < count; i++) {
-                int base = 2 + i * 3;
-                if (base + 1 < nf)
-                    printf("  %-5s  %-28s\n", fields[base], fields[base+1]);
-            }
-
-            int cid = read_int("  Enter Candidate ID: ");
-            snprintf(cmd, sizeof(cmd), "CAST_VOTE|%d|%d|%d\n",
-                     voter_id, cid, pos);
-            if (!send_command(cmd, resp, sizeof(resp))) break;
-
-            strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-            resp_copy[sizeof(resp_copy) - 1] = '\0';
-            nf = parse_response(resp_copy, fields, MAX_FIELDS);
-
-            if (nf >= 1 && strcmp(fields[0], "OK") == 0)
-                printf("  [OK]  Vote cast successfully for %s!\n",
-                       POSITION_NAMES[pos]);
-            else if (nf >= 2) {
-                if (strcmp(fields[1], "ALREADY_VOTED") == 0)
-                    printf("  [ERR] You have already voted for %s.\n",
-                           POSITION_NAMES[pos]);
-                else if (strcmp(fields[1], "INVALID_CANDIDATE") == 0)
-                    printf("  [ERR] Invalid candidate ID or position mismatch.\n");
-                else if (strcmp(fields[1], "VOTER_NOT_FOUND") == 0)
-                    printf("  [ERR] Voter record not found.\n");
-                else
-                    printf("  [ERR] %s\n", fields[1]);
-            }
-            break;
-        }
-
-        case 3: {
-            snprintf(cmd, sizeof(cmd), "VOTER_STATUS|%d\n", voter_id);
-            if (!send_command(cmd, resp, sizeof(resp))) break;
-
-            strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-            resp_copy[sizeof(resp_copy) - 1] = '\0';
-            int nf = parse_response(resp_copy, fields, MAX_FIELDS);
-
-            if (nf >= 2 && strcmp(fields[0], "OK") == 0) {
-                printf("\n  Voting Status  -  %s\n", fields[1]);
-                printf("  %-22s  %s\n", "Position", "Status");
-                printf("  %-22s  %s\n",
-                       "----------------------", "----------");
-                for (int i = 0; i < MAX_POSITIONS; i++) {
-                    int flag = (2 + i < nf) ? atoi(fields[2 + i]) : 0;
-                    printf("  %-22s  %s\n",
-                           POSITION_NAMES[i],
-                           flag ? "[VOTED]" : "[PENDING]");
-                }
-            } else {
-                printf("  [ERR] Could not retrieve voting status.\n");
-            }
-            break;
-        }
-
-        case 4:
-            printf("  Logged out.  Goodbye, %s!\n", voter_name);
-            break;
-
-        default:
-            printf("  [!] Invalid choice.\n");
-        }
-    } while (choice != 4);
-}
-
-/* ── Voter Portal ────────────────────────────────────────────────── */
-static void voter_portal(void)
-{
-    int   choice;
-    char  cmd[BUFFER_SIZE], resp[BUFFER_SIZE], resp_copy[BUFFER_SIZE];
-    char *fields[16];
-
-    do {
-        printf("\n=== VOTER PORTAL ===\n");
-        printf("  1. Register\n");
-        printf("  2. Login\n");
-        printf("  3. Back\n");
-        print_line();
-        choice = read_int("  Choice: ");
-
-        if (choice == 1) {
-            char name[MAX_NAME_LEN], user[MAX_NAME_LEN], pass[MAX_PASS_LEN];
-            printf("\n  -- Voter Registration --\n");
-            read_line("  Full Name : ", name, sizeof(name));
-            read_line("  Username  : ", user, sizeof(user));
-            read_line("  Password  : ", pass, sizeof(pass));
-
-            snprintf(cmd, sizeof(cmd), "REG_VOTER|%s|%s|%s\n", name, user, pass);
-            if (send_command(cmd, resp, sizeof(resp))) {
-                strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-                resp_copy[sizeof(resp_copy) - 1] = '\0';
-                int nf = parse_response(resp_copy, fields, 16);
-                if (nf >= 2 && strcmp(fields[0], "OK") == 0)
-                    printf("  [OK]  Registered!  Your Voter ID: %s\n", fields[1]);
-                else
-                    printf("  [ERR] Username already taken.  Choose another.\n");
-            }
-
-        } else if (choice == 2) {
-            char user[MAX_NAME_LEN], pass[MAX_PASS_LEN];
-            printf("\n  -- Voter Login --\n");
-            read_line("  Username : ", user, sizeof(user));
-            read_line("  Password : ", pass, sizeof(pass));
-
-            snprintf(cmd, sizeof(cmd), "LOGIN_VOTER|%s|%s\n", user, pass);
-            if (send_command(cmd, resp, sizeof(resp))) {
-                strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-                resp_copy[sizeof(resp_copy) - 1] = '\0';
-                int nf = parse_response(resp_copy, fields, 16);
-                if (nf >= 3 && strcmp(fields[0], "OK") == 0) {
-                    int id = atoi(fields[1]);
-                    voting_booth(id, fields[2]);
-                } else {
-                    printf("  [ERR] Invalid credentials.\n");
-                }
-            }
-        }
-    } while (choice != 3);
-}
-
-/* ── Candidate Portal ────────────────────────────────────────────── */
-static void candidate_portal(void)
-{
-    int   choice;
-    char  cmd[BUFFER_SIZE], resp[BUFFER_SIZE], resp_copy[BUFFER_SIZE];
-    char *fields[16];
-
-    do {
-        printf("\n=== CANDIDATE PORTAL ===\n");
-        printf("  1. Register\n");
-        printf("  2. Login\n");
-        printf("  3. Back\n");
-        print_line();
-        choice = read_int("  Choice: ");
-
-        if (choice == 1) {
-            char name[MAX_NAME_LEN], user[MAX_NAME_LEN], pass[MAX_PASS_LEN];
-            printf("\n  -- Candidate Registration --\n");
-            read_line("  Full Name  : ", name, sizeof(name));
-            read_line("  Username   : ", user, sizeof(user));
-            read_line("  Password   : ", pass, sizeof(pass));
-
-            printf("\n  Positions:\n");
-            for (int i = 0; i < MAX_POSITIONS; i++)
-                printf("    %d. %s\n", i, POSITION_NAMES[i]);
-            int pos = read_int("  Position ID (0-4): ");
-
-            snprintf(cmd, sizeof(cmd), "REG_CAND|%s|%s|%s|%d\n",
-                     name, user, pass, pos);
-            if (send_command(cmd, resp, sizeof(resp))) {
-                strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-                resp_copy[sizeof(resp_copy) - 1] = '\0';
-                int nf = parse_response(resp_copy, fields, 16);
-                if (nf >= 2 && strcmp(fields[0], "OK") == 0)
-                    printf("  [OK]  Registered!  Your Candidate ID: %s\n",
-                           fields[1]);
-                else if (nf >= 2 && strcmp(fields[1], "INVALID_POSITION") == 0)
-                    printf("  [ERR] Invalid position ID.\n");
-                else
-                    printf("  [ERR] Username already taken.  Choose another.\n");
-            }
-
-        } else if (choice == 2) {
-            char user[MAX_NAME_LEN], pass[MAX_PASS_LEN];
-            printf("\n  -- Candidate Login --\n");
-            read_line("  Username : ", user, sizeof(user));
-            read_line("  Password : ", pass, sizeof(pass));
-
-            snprintf(cmd, sizeof(cmd), "LOGIN_CAND|%s|%s\n", user, pass);
-            if (send_command(cmd, resp, sizeof(resp))) {
-                strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-                resp_copy[sizeof(resp_copy) - 1] = '\0';
-                int nf = parse_response(resp_copy, fields, 16);
-                if (nf >= 5 && strcmp(fields[0], "OK") == 0) {
-                    printf("\n  === CANDIDATE DASHBOARD ===\n");
-                    printf("  Name     : %s\n", fields[2]);
-                    printf("  Position : %s\n", fields[3]);
-                    printf("  Votes    : %s\n", fields[4]);
-                    printf("  ID       : %s\n", fields[1]);
-                    printf("\n  (Press Enter to continue)\n");
-                    char tmp[4];
-                    read_line("", tmp, sizeof(tmp));
-                } else {
-                    printf("  [ERR] Invalid credentials.\n");
-                }
-            }
-        }
-    } while (choice != 3);
-}
-
-/* ── Results Viewer ──────────────────────────────────────────────── */
-static void results_menu(void)
-{
-    int   choice;
-    char  cmd[BUFFER_SIZE], resp[BUFFER_SIZE], resp_copy[BUFFER_SIZE];
-    char *fields[MAX_FIELDS];
-
-    do {
-        printf("\n=== RESULTS VIEWER ===\n");
-        printf("  1. Results by Position\n");
-        printf("  2. All Results\n");
-        printf("  3. Back\n");
-        print_line();
-        choice = read_int("  Choice: ");
-
-        if (choice == 1) {
-            int pos = choose_position();
-            if (pos < 0) continue;
-
-            snprintf(cmd, sizeof(cmd), "GET_RESULTS|%d\n", pos);
-            if (!send_command(cmd, resp, sizeof(resp))) continue;
-
-            strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-            resp_copy[sizeof(resp_copy) - 1] = '\0';
-            int nf = parse_response(resp_copy, fields, MAX_FIELDS);
-
-            if (nf >= 2 && strcmp(fields[0], "OK") == 0) {
-                int count = atoi(fields[1]);
-                printf("\n  Results  -  %s\n", POSITION_NAMES[pos]);
-                printf("  %-4s  %-28s  %s\n", "Rank", "Name", "Votes");
-                printf("  %-4s  %-28s  %s\n",
-                       "----", "----------------------------", "-----");
-                if (count == 0) {
-                    printf("  (no candidates registered)\n");
-                } else {
-                    for (int i = 0; i < count; i++) {
-                        int base = 2 + i * 2;
-                        if (base + 1 < nf)
-                            printf("  %-4d  %-28s  %s\n",
-                                   i + 1, fields[base], fields[base+1]);
-                    }
-                }
-            } else {
-                printf("  [ERR] %s\n", (nf >= 2) ? fields[1] : "Unknown error");
-            }
-
-        } else if (choice == 2) {
-            printf("\n=== FULL ELECTION RESULTS ===\n");
-            for (int pos = 0; pos < MAX_POSITIONS; pos++) {
-                snprintf(cmd, sizeof(cmd), "GET_RESULTS|%d\n", pos);
-                if (!send_command(cmd, resp, sizeof(resp))) continue;
-
-                strncpy(resp_copy, resp, sizeof(resp_copy) - 1);
-                resp_copy[sizeof(resp_copy) - 1] = '\0';
-                int nf = parse_response(resp_copy, fields, MAX_FIELDS);
-
-                printf("\n  %-28s\n", POSITION_NAMES[pos]);
-                printf("  %.28s\n", "----------------------------");
-
-                if (nf >= 2 && strcmp(fields[0], "OK") == 0) {
-                    int count = atoi(fields[1]);
-                    if (count == 0) {
-                        printf("  (no candidates registered)\n");
-                    } else {
-                        printf("  %-4s  %-28s  %s\n", "Rank", "Name", "Votes");
-                        printf("  %-4s  %-28s  %s\n",
-                               "----", "----------------------------", "-----");
-                        for (int i = 0; i < count; i++) {
-                            int base = 2 + i * 2;
-                            if (base + 1 < nf)
-                                printf("  %-4d  %-28s  %s\n",
-                                       i + 1, fields[base], fields[base+1]);
-                        }
-                    }
-                }
-            }
-        }
-    } while (choice != 3);
-}
-
-/* ── Entry point ─────────────────────────────────────────────────── */
-int main(int argc, char *argv[])
-{
+    // 3-second receive timeout
 #ifdef _WIN32
-    /* Initialise Winsock on Windows */
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        printf("[!] WSAStartup failed.\n");
-        return 1;
-    }
+    DWORD timeout = 3000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    struct timeval tv; tv.tv_sec = 3; tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
 
-    if (argc >= 2) {
-        strncpy(g_server_ip, argv[1], sizeof(g_server_ip) - 1);
-        g_server_ip[sizeof(g_server_ip) - 1] = '\0';
+    struct sockaddr_in from_addr;
+    socklen_t from_len = sizeof(from_addr);
+    int bytes = recvfrom(sock, response, resp_size - 1, 0, (struct sockaddr *)&from_addr, &from_len);
+    
+    CLOSE_SOCK(sock);
+    if (bytes > 0) {
+        response[bytes] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+/* ── Portal Logic ────────────────────────────────────────────────── */
+
+void view_results() {
+    print_line();
+    printf("         LIVE ELECTION RESULTS\n");
+    print_line();
+    for (int i = 0; i < MAX_POSITIONS; i++) {
+        char cmd[64], resp[BUFFER_SIZE];
+        sprintf(cmd, "GET_RESULTS|%d", i);
+        if (send_command(cmd, resp, BUFFER_SIZE)) {
+            printf("\n[%s]\n", POSITION_NAMES[i]);
+            // Simple parsing of "OK|count|name|votes..."
+            char *token = strtok(resp, "|"); // OK
+            token = strtok(NULL, "|");       // count
+            int count = token ? atoi(token) : 0;
+            if (count == 0) printf("  (No candidates)\n");
+            for (int j = 0; j < count; j++) {
+                char *name = strtok(NULL, "|");
+                char *votes = strtok(NULL, "|");
+                printf("  %-20s : %s votes\n", name, votes);
+            }
+        }
+    }
+}
+
+void voter_portal() {
+    char user[64], pass[64], cmd[256], resp[BUFFER_SIZE];
+    printf("\n--- VOTER LOGIN ---\n");
+    read_line("Username: ", user, 64);
+    read_line("Password: ", pass, 64);
+
+    sprintf(cmd, "LOGIN_VOTER|%s|%s", user, pass);
+    if (!send_command(cmd, resp, BUFFER_SIZE) || strncmp(resp, "OK", 2) != 0) {
+        printf("[!] Login failed.\n");
+        return;
     }
 
-    printf("==========================================\n");
-    printf("    ELECTRONIC VOTING SYSTEM  v3.0       \n");
-    printf("    Assignment 3  -  UDP Connectionless  \n");
-    printf("==========================================\n");
-    printf("    Server  : %s:%d\n", g_server_ip, SERVER_PORT);
-    printf("==========================================\n");
+    char *token = strtok(resp, "|"); // OK
+    char *v_id = strtok(NULL, "|");
+    char *v_name = strtok(NULL, "|");
+    printf("\nWelcome, %s (ID: %s)\n", v_name, v_id);
+
+    // Voting loop
+    for (int i = 0; i < MAX_POSITIONS; i++) {
+        printf("\nPosition: %s\n", POSITION_NAMES[i]);
+        sprintf(cmd, "LIST_CANDS|%d", i);
+        send_command(cmd, resp, BUFFER_SIZE);
+        
+        printf("Candidates:\n%s\n", resp);
+        int c_id = read_int("Enter Candidate ID to vote (0 to skip): ");
+        if (c_id > 0) {
+            sprintf(cmd, "CAST_VOTE|%s|%d|%d", v_id, c_id, i);
+            send_command(cmd, resp, BUFFER_SIZE);
+            printf("Server: %s\n", resp);
+        }
+    }
+}
+
+/* ── Main Entry ──────────────────────────────────────────────────── */
+int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
+
+    if (argc >= 3) {
+        strncpy(g_server_ip, argv[1], sizeof(g_server_ip) - 1);
+        g_server_port = atoi(argv[2]);
+    }
 
     int choice;
     do {
-        printf("\n=== MAIN MENU ===\n");
-        printf("  1. Voter Portal\n");
-        printf("  2. Candidate Portal\n");
-        printf("  3. View Results\n");
-        printf("  4. Exit\n");
-        print_line();
-        choice = read_int("  Choice: ");
+        printf("\n==========================================\n");
+        printf("    SONU VOTING SYSTEM - CLIENT\n");
+        printf("    Connected to: %s:%d\n", g_server_ip, g_server_port);
+        printf("==========================================\n");
+        printf("1. Voter Portal\n2. View Results\n3. Exit\nChoice: ");
+        choice = read_int("");
 
         switch (choice) {
-        case 1: voter_portal();     break;
-        case 2: candidate_portal(); break;
-        case 3: results_menu();     break;
-        case 4: printf("\n  Goodbye!\n\n"); break;
-        default: printf("  [!] Invalid choice.\n");
+            case 1: voter_portal(); break;
+            case 2: view_results(); break;
         }
-    } while (choice != 4);
+    } while (choice != 3);
 
 #ifdef _WIN32
     WSACleanup();

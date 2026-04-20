@@ -51,6 +51,8 @@ assignment3/
     └── Makefile (linux)    ← Linux-only build reference
 ```
 
+
+
 ### Component roles
 
 | Component | Description |
@@ -63,6 +65,7 @@ assignment3/
 | `file_io.c` | `open_voters_file()`, `open_candidates_file()`, `get_record_count()`. Centralises file paths. |
 
 ---
+
 
 ## Building
 
@@ -145,21 +148,47 @@ The client banner confirms the target on startup:
 ==========================================
 ```
 
+# SONU Electronic Voting System — Assignment 3 (Global Access Edition)
+
+## Overview
+This is the **Assignment 3** upgrade of the SONU Electronic Voting System. It features a **Linux/POSIX, connectionless UDP server** that handles concurrency by `fork()`ing a child process for every client request. 
+
+This version is optimized for **Global Access** using **Playit.gg**, allowing clients to connect from any network without requiring complex router port forwarding.
+
+| Feature | Assignment 2 | Assignment 3 |
+|---|---|---|
+| Transport | TCP — `SOCK_STREAM` | **UDP — `SOCK_DGRAM`** |
+| Concurrency | Iterative | **fork() per datagram** |
+| Connectivity | Local LAN / Port Forwarding | **Global Tunnel (Playit.gg)** |
+| Addressing | Static IP | **Dynamic Hostname Support** |
+
 ---
 
-<<<<<<< HEAD
-=======
-## Cross-Platform Client Support
+## Global Connectivity Setup (Playit.gg)
 
-- The client (`client.c`) is designed to work on both **Linux** and **Windows** (with minor adjustments for socket initialization and includes).
-- On Linux, compile and run as described above.
-- On Windows, use a compatible C compiler (e.g., MinGW or Visual Studio), and ensure Winsock2 initialization is handled if porting.
-- The client can communicate with the server regardless of the OS, as long as both support UDP sockets and the protocol.
+Instead of traditional port forwarding, this application now uses a UDP tunnel to bridge local development with the public internet.
 
+### 1. Server-Side Tunneling
+1. **Install Playit Agent**: Download the agent from [playit.gg](https://playit.gg).
+2. **Create UDP Tunnel**:
+   - Run the agent and claim your account.
+   - Add a new **UDP** tunnel.
+   - Set the **Local Port** to `8080`.
+3. **Get your Global Address**: Playit will provide a dedicated IP or hostname (e.g., `147.185.221.223` or `voter-app.ply.gg`) and a unique **Port** (e.g., `3467`).
+
+### 2. Client Connection
+The client now supports DNS resolution. You can connect using the Playit IP/hostname and the specific assigned port.
+
+```bash
+# General Usage
+./bin/client [Global_IP_or_Hostname] [Global_Port]
+
+# Example using your specific tunnel
+./bin/client 147.185.221.223 3467
+```
 
 ---
 
->>>>>>> 2e9d4b6 (client support for windows)
 ## Application Protocol
 
 All messages are **pipe-delimited plain-text strings terminated by `\n`**.
@@ -360,7 +389,3 @@ Find the server's public IP (needed for cross-network clients):
 ```bash
 curl ifconfig.me
 ```
-<<<<<<< HEAD
-=======
-
->>>>>>> 2e9d4b6 (client support for windows)

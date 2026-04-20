@@ -211,6 +211,10 @@ static void handle_command(const char *raw, char *resp, int resp_size)
                                "|%d", v.voted_positions[i]);
         strncat(resp, "\n", resp_size - strlen(resp) - 1);
     }
+
+    else if (strcmp(f[0], "PING") == 0) {
+    snprintf(resp, resp_size, "OK|PONG\n");
+    }
     /* ── Unknown command ─────────────────────────────────────────── */
     else {
         snprintf(resp, resp_size, "ERR|UNKNOWN_COMMAND\n");
