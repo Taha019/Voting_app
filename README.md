@@ -25,11 +25,11 @@ assignment3/
 ├── server_side/            ← Linux server + all business logic
 │   ├── src/
 │   │   ├── server.c        ← UDP server, forks per client request
-│   │   ├── client.c        ← Linux client (also built here)
+│   │   └── file_io.c       ← Binary flat-file helpers 
 │   │   ├── voter.c         ← Voter registration, login, status
 │   │   ├── candidate.c     ← Candidate registration, login, lookup
 │   │   ├── election.c      ← Vote casting + result tallying
-│   │   └── file_io.c       ← Binary flat-file helpers
+│   │  
 │   ├── headers/
 │   │   ├── positions.h     ← Compile-time position constants (shared)
 │   │   ├── voter.h
@@ -40,16 +40,14 @@ assignment3/
 │   │   ├── voters.dat      ← Binary flat file of Voter structs
 │   │   └── candidates.dat  ← Binary flat file of Candidate structs
 │   ├── obj/                ← Compiled object files (generated)
-│   ├── bin/                ← Compiled binaries (generated)
+│   ├── bin/                ← Compiled binary (generated)
 │   │   ├── server
-│   │   └── client
+│   │   
 │   └── Makefile
 └── client_side/            ← Windows client (MinGW/MSYS2)
     ├── client.c            ← Cross-platform client source (same file as server_side)
-    ├── positions.h         ← Shared position constants
-    ├── Makefile            ← Windows build (produces client.exe)
-    └── Makefile (linux)    ← Linux-only build reference
-```
+    ├── client              ← compiled binary for client (generated)
+
 
 
 
@@ -72,11 +70,19 @@ assignment3/
 Requires GCC and standard POSIX libraries (no extra packages needed on any
 modern Linux distribution).
 
+in ./server_side for server:
+
 ```bash
 make
 ```
 
-This produces `bin/server` and `bin/client`.
+This produces `bin/server`.
+
+In ./client_side for client:
+
+```bash
+gcc -o client client.c
+```
 
 To rebuild from scratch:
 
@@ -92,10 +98,10 @@ make clean && make
 
 ```bash
 # Terminal 1 — start the server
-./bin/server
+./server_side/bin/server
 
 # Terminal 2 — start the client (defaults to 127.0.0.1)
-./bin/client
+./client_side/client 127.0.0.1 8080
 ```
 
 ### Same network (LAN)
@@ -111,7 +117,7 @@ The server prints its local IP addresses at startup:
 On any other machine on the same network:
 
 ```bash
-./bin/client 192.168.1.42
+./client_side/client 192.168.1.42
 ```
 
 ### Different network (across the internet)
@@ -135,7 +141,7 @@ curl ifconfig.me
 
 On the remote client machine:
 ```bash
-./bin/client 203.0.113.5      # replace with actual public IP
+./client 203.0.113.5      # replace with actual public IP
 ```
 
 The client banner confirms the target on startup:
@@ -181,10 +187,10 @@ The client now supports DNS resolution. You can connect using the Playit IP/host
 
 ```bash
 # General Usage
-./bin/client [Global_IP_or_Hostname] [Global_Port]
+./client [Global_IP_or_Hostname] [Global_Port]
 
 # Example using your specific tunnel
-./bin/client 147.185.221.223 3467
+./client 147.185.221.223 3467
 ```
 
 
