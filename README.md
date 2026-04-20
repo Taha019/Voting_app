@@ -22,23 +22,33 @@ business logic identical to Assignment 2.
 
 ```
 assignment3/
-├── src/
-│   ├── server.c        ← UDP server + fork() dispatcher
-│   ├── client.c        ← UDP client + menu UI
-│   ├── voter.c         ← Voter registration, login, status (server-side)
-│   ├── candidate.c     ← Candidate registration, login, lookup (server-side)
-│   ├── election.c      ← Vote casting + result tallying (server-side)
-│   └── file_io.c       ← Binary flat-file helpers (server-side)
-├── headers/
-│   ├── positions.h     ← Compile-time position constants (shared)
-│   ├── voter.h
-│   ├── candidate.h
-│   ├── election.h
-│   └── file_io.h
-├── data/
-│   ├── voters.dat      ← Binary flat file of Voter structs
-│   └── candidates.dat  ← Binary flat file of Candidate structs
-└── Makefile
+├── server_side/            ← Linux server + all business logic
+│   ├── src/
+│   │   ├── server.c        ← UDP server, forks per client request
+│   │   ├── client.c        ← Linux client (also built here)
+│   │   ├── voter.c         ← Voter registration, login, status
+│   │   ├── candidate.c     ← Candidate registration, login, lookup
+│   │   ├── election.c      ← Vote casting + result tallying
+│   │   └── file_io.c       ← Binary flat-file helpers
+│   ├── headers/
+│   │   ├── positions.h     ← Compile-time position constants (shared)
+│   │   ├── voter.h
+│   │   ├── candidate.h
+│   │   ├── election.h
+│   │   └── file_io.h
+│   ├── data/
+│   │   ├── voters.dat      ← Binary flat file of Voter structs
+│   │   └── candidates.dat  ← Binary flat file of Candidate structs
+│   ├── obj/                ← Compiled object files (generated)
+│   ├── bin/                ← Compiled binaries (generated)
+│   │   ├── server
+│   │   └── client
+│   └── Makefile
+└── client_side/            ← Windows client (MinGW/MSYS2)
+    ├── client.c            ← Cross-platform client source (same file as server_side)
+    ├── positions.h         ← Shared position constants
+    ├── Makefile            ← Windows build (produces client.exe)
+    └── Makefile (linux)    ← Linux-only build reference
 ```
 
 ### Component roles
